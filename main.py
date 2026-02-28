@@ -50,7 +50,9 @@ class MistralLLM(LLM):
 
         return response.choices[0].message.content.strip()
 
-
+@app.get("/")
+def root():
+    return {"status": "ok"}
 # LangChain Pandas Agent
 llm = MistralLLM()
 
