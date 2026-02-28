@@ -116,11 +116,20 @@ def ask_question(q: Question):
             return {"answer": f"{pct:.2f}% of passengers were male.", "plot": fig_to_base64()}
 
         # --- Otherwise: LangChain agent for general questions ---
-        result = agent.invoke(
-            {"input": q.question},
-            config={"handle_parsing_errors": True}
-        )
-        return {"answer": result["output"]}
+        # Small talk bypass (prevents agent from trying to use tools)
+        small_talk = ["thanks", "thank you", "ok", "okay", "good", "nice", "cool"]
+        if q.question.strip().lower() in small_talk:
+            return {"answer": "You're welcome! 😊 Ask me anything about the Titanic dataset."}
+
+        try:
+            result = agent.invoke({"input": q.question})
+            return {"answer": result["output"]}
+        except Exception:
+            # Fallback if parsing still fails
+            clean_answer = llm._call(
+                f"Answer clearly and directly in plain English without using tools:\n{q.question}"
+            )
+            return {"answer": clean_answer}
 
     except Exception as e:
         return {"answer": str(e)}   
