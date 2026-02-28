@@ -61,6 +61,7 @@ agent = create_pandas_dataframe_agent(
     df,
     verbose=False,
     allow_dangerous_code=True,
+    handle_parsing_errors=True 
 )
 
 
@@ -115,8 +116,11 @@ def ask_question(q: Question):
             return {"answer": f"{pct:.2f}% of passengers were male.", "plot": fig_to_base64()}
 
         # --- Otherwise: LangChain agent for general questions ---
-        result = agent.invoke({"input": q.question})
+        result = agent.invoke(
+            {"input": q.question},
+            config={"handle_parsing_errors": True}
+        )
         return {"answer": result["output"]}
 
     except Exception as e:
-        return {"answer": str(e)}
+        return {"answer": str(e)}   
