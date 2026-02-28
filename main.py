@@ -9,42 +9,46 @@ import io, base64, os
 from dotenv import load_dotenv
 load_dotenv()
 
-import requests
+from mistralai.client import MistralClient
+from mistralai.models.chat_completion import ChatMessage
+
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain_core.language_models.llms import LLM
 from typing import Optional, List, Any
 
+
 app = FastAPI()
 df = pd.read_csv("titanic.csv")
 
-# --------- Together API LLM Wrapper (Stable) ----------
-class TogetherLLM(LLM):
-    model: str = "mistralai/Mistral-7B-Instruct-v0.1"
-    api_key: str = os.getenv("TOGETHER_API_KEY", "")
+
+# --------- Mistral HTTP LLM Wrapper (Stable) ----------
+class MistralLLM(LLM):
+    model: str = "mistral-small-latest"   # you can change to mistral-medium-latest if you have access
+    api_key: str = os.getenv("MISTRAL_API_KEY", "")
 
     @property
     def _llm_type(self) -> str:
-        return "together_http"
+        return "mistral_http"
 
     def _call(self, prompt: str, stop: Optional[List[str]] = None, **kwargs: Any) -> str:
-        url = "https://api.together.xyz/v1/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "max_tokens": 512,
-            "temperature": 0
-        }
-        r = requests.post(url, headers=headers, json=payload, timeout=60)
-        r.raise_for_status()
-        data = r.json()
-        text = data["choices"][0]["text"]
-        return text.strip()
+        if not self.api_key:
+            raise ValueError("MISTRAL_API_KEY is missing in environment variables")
 
-llm = TogetherLLM()
+        client = MistralClient(api_key=self.api_key)
+
+        messages = [
+            ChatMessage(role="user", content=prompt)
+        ]
+
+        response = client.chat(
+            model=self.model,
+            messages=messages
+        )
+
+        return response.choices[0].message.content.strip()
+
+
+llm = MistralLLM()
 
 agent = create_pandas_dataframe_agent(
     llm,
@@ -53,8 +57,10 @@ agent = create_pandas_dataframe_agent(
     allow_dangerous_code=True
 )
 
+
 class Question(BaseModel):
     question: str
+
 
 def fig_to_base64():
     buf = io.BytesIO()
@@ -63,9 +69,11 @@ def fig_to_base64():
     buf.seek(0)
     return base64.b64encode(buf.read()).decode()
 
+
 @app.get("/health")
 def health():
-    return {"key_loaded": bool(os.getenv("TOGETHER_API_KEY"))}
+    return {"key_loaded": bool(os.getenv("MISTRAL_API_KEY"))}
+
 
 @app.post("/ask")
 def ask_question(q: Question):
@@ -73,6 +81,7 @@ def ask_question(q: Question):
 
     try:
         # --- Visualizations required by assignment ---
+
         if "histogram" in question and "age" in question:
             plt.figure()
             df["Age"].dropna().hist(bins=20)
@@ -101,8 +110,9 @@ def ask_question(q: Question):
             return {"answer": f"{pct:.2f}% of passengers were male.", "plot": fig_to_base64()}
 
         # --- Otherwise: LangChain agent for general questions ---
-        response = agent.run(q.question)
-        return {"answer": response}
+        # Use invoke (more stable than run)
+        result = agent.invoke({"input": q.question})
+        return {"answer": result["output"]}
 
     except Exception as e:
         return {"answer": str(e)}
