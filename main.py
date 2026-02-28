@@ -2,59 +2,63 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import pandas as pd
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import io, base64, os
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
-from mistralai.client import MistralClient
-from mistralai.models.chat_completion import ChatMessage
+from mistralai import Mistral
 
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain_core.language_models.llms import LLM
 from typing import Optional, List, Any
 
-
 app = FastAPI()
+
+# Load dataset
 df = pd.read_csv("titanic.csv")
 
 
-# --------- Mistral HTTP LLM Wrapper (Stable) ----------
+# --------- Mistral HTTP LLM Wrapper ----------
 class MistralLLM(LLM):
-    model: str = "mistral-small-latest"   # you can change to mistral-medium-latest if you have access
+    model: str = "mistral-small-latest"
     api_key: str = os.getenv("MISTRAL_API_KEY", "")
 
     @property
     def _llm_type(self) -> str:
         return "mistral_http"
 
-    def _call(self, prompt: str, stop: Optional[List[str]] = None, **kwargs: Any) -> str:
+    def _call(
+        self,
+        prompt: str,
+        stop: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> str:
         if not self.api_key:
-            raise ValueError("MISTRAL_API_KEY is missing in environment variables")
+            raise ValueError("MISTRAL_API_KEY is missing")
 
-        client = MistralClient(api_key=self.api_key)
+        client = Mistral(api_key=self.api_key)
 
-        messages = [
-            ChatMessage(role="user", content=prompt)
-        ]
-
-        response = client.chat(
+        response = client.chat.complete(
             model=self.model,
-            messages=messages
+            messages=[{"role": "user", "content": prompt}],
         )
 
         return response.choices[0].message.content.strip()
 
 
+# LangChain Pandas Agent
 llm = MistralLLM()
 
 agent = create_pandas_dataframe_agent(
     llm,
     df,
     verbose=False,
-    allow_dangerous_code=True
+    allow_dangerous_code=True,
 )
 
 
@@ -81,7 +85,6 @@ def ask_question(q: Question):
 
     try:
         # --- Visualizations required by assignment ---
-
         if "histogram" in question and "age" in question:
             plt.figure()
             df["Age"].dropna().hist(bins=20)
@@ -110,7 +113,6 @@ def ask_question(q: Question):
             return {"answer": f"{pct:.2f}% of passengers were male.", "plot": fig_to_base64()}
 
         # --- Otherwise: LangChain agent for general questions ---
-        # Use invoke (more stable than run)
         result = agent.invoke({"input": q.question})
         return {"answer": result["output"]}
 
